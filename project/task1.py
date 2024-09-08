@@ -2,6 +2,7 @@ import cfpq_data as cfpq
 from typing import Tuple, Set, Any
 import networkx as nx
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass
@@ -24,13 +25,13 @@ def get_graph_info(name: str) -> GraphInfo:
     )
 
 
-def save_to_dot(graph: nx.MultiDiGraph, filename: str) -> None:
+def save_to_dot(graph: nx.MultiDiGraph, filename: Path) -> None:
     dot_graph = nx.drawing.nx_pydot.to_pydot(graph)
     dot_graph.write_raw(filename)
 
 
 def build_labeled_two_cycles_graph(
-    n: int, m: int, labels: Tuple[str, str], output_file: str
+    n: int, m: int, labels: Tuple[str, str], output_file: Path
 ) -> None:
     G = cfpq.labeled_two_cycles_graph(n, m, labels=labels)
     save_to_dot(G, output_file)
