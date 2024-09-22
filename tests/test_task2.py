@@ -5,7 +5,7 @@ from project.task1 import load_graph
 def test_regex_to_dfa():
     dfa = regex_to_dfa("abc|d")
     assert dfa.accepts(["abc"])
-    assert dfa.accepts(["abc"])
+    assert dfa.accepts(["d"])
     assert not dfa.accepts("abc")
 
 
