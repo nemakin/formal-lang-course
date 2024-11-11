@@ -10,14 +10,14 @@ def ms_bfs_based_rpq(
 ) -> set[tuple[int, int]]:
     dfa_m = AdjacencyMatrixFA(regex_to_dfa(regex))
     nfa_m = AdjacencyMatrixFA(graph_to_nfa(graph, start_nodes, final_nodes))
-    nfa_start_states_count = len(nfa_m.start_states_indices)
+    nfa_start_states_count = len(nfa_m.start_state_index)
 
     def init_front():
-        dfa_start = list(dfa_m.start_states_indices)[0]
+        dfa_start = list(dfa_m.start_state_index)[0]
         rows = [
             dfa_start + dfa_m.states_count * i for i in range(nfa_start_states_count)
         ]
-        cols = [start_state_ind for start_state_ind in nfa_m.start_states_indices]
+        cols = [start_state_ind for start_state_ind in nfa_m.start_state_index]
         data = np.ones(nfa_start_states_count, dtype=bool)
         return sparse.csr_matrix(
             (data, (rows, cols)),
@@ -61,14 +61,14 @@ def ms_bfs_based_rpq(
         front = update_front(front)
         front = front > visited
 
-    dfa_final_states_index = dfa_m.final_states_indices
-    nfa_idx_to_st = {index: state for state, index in nfa_m.states.items()}
+    dfa_final_states_index = dfa_m.final_state_index
+    nfa_idx_to_st = {index: state for state, index in nfa_m.state_index.items()}
     nfa_final_states = np.array(
-        [i in nfa_m.final_states_indices for i in range(nfa_m.states_count)], dtype=bool
+        [i in nfa_m.final_state_index for i in range(nfa_m.states_count)], dtype=bool
     )
     pairs = set()
 
-    for i, nfa_start_state_id in enumerate(nfa_m.start_states_indices, 0):
+    for i, nfa_start_state_id in enumerate(nfa_m.start_state_index, 0):
         for dfa_final_state_id in dfa_final_states_index:
             row = visited[i * dfa_m.states_count + dfa_final_state_id]
             row_vector = np.array(

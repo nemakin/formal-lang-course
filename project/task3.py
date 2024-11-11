@@ -1,48 +1,80 @@
-import itertools
-from typing import Iterable
+from project.task2 import (
+    NondeterministicFiniteAutomaton,
+    regex_to_dfa,
+    graph_to_nfa,
+    State,
+)
 
-from pyformlang.finite_automaton import NondeterministicFiniteAutomaton, Symbol
-from scipy.sparse import csr_matrix
-from networkx import MultiDiGraph
-
+from collections import defaultdict
+from typing import Dict, Set, Iterable
 import numpy as np
 import scipy.sparse as sp
-
-from project.task2 import regex_to_dfa, graph_to_nfa
+from networkx import MultiDiGraph
 
 
 class AdjacencyMatrixFA:
-    def __init__(self, fa: NondeterministicFiniteAutomaton = None):
-        if fa is None:
-            self.states = {}
-            self.states_count = 0
-            self.start_states_indices = set()
-            self.final_states_indices = set()
-            self.boolean_decomposition = {}
+    def __init__(
+        self,
+        automaton: NondeterministicFiniteAutomaton = None,
+    ):
+        self.state_index: Dict[State, int] = {}
+        self.start_state_index: Set[int] = set()
+        self.final_state_index: Set[int] = set()
+        self.states_count = 0
+        self.index_state = {}
+        self.boolean_decomposition: Dict[str, sp.csr_matrix] = {}
+
+        if automaton is None:
             return
 
-        self.states = {state: index for (index, state) in enumerate(fa.states)}
-        self.states_count = len(fa.states)
-        self.start_states_indices = set(self.states[state] for state in fa.start_states)
-        self.final_states_indices = set(self.states[state] for state in fa.final_states)
-        self.boolean_decomposition = self.boolean_decomposition(fa)
+        graph = automaton.to_networkx()
+        self.states_count = graph.number_of_nodes()
+        self.state_index = {state: idx for idx, state in enumerate(graph.nodes)}
+        self.index_state = {idx: state for state, idx in self.state_index.items()}
 
-    def boolean_decomposition(self, fa: NondeterministicFiniteAutomaton):
-        decomposition = {}
-        for first_state, trans in fa.to_dict().items():
-            for symbol, next_states in trans.items():
-                next_states = (
-                    {next_states} if not isinstance(next_states, set) else next_states
-                )
-                if symbol not in decomposition:
-                    decomposition[symbol] = csr_matrix(
-                        (self.states_count, self.states_count), dtype=bool
-                    )
-                for next_state in next_states:
-                    first_state_index = self.states[first_state]
-                    next_state_index = self.states[next_state]
-                    decomposition[symbol][first_state_index, next_state_index] = True
-        return decomposition
+        for node, attributes in graph.nodes(data=True):
+            if attributes.get("is_start", False):
+                self.start_state_index.add(self.state_index[node])
+            if attributes.get("is_final", False):
+                self.final_state_index.add(self.state_index[node])
+
+        transitions = defaultdict(
+            lambda: np.zeros((self.states_count, self.states_count), dtype=bool)
+        )
+
+        for source, target, symbol in graph.edges(data="label"):
+            if symbol:
+                transitions[symbol][
+                    self.state_index[source], self.state_index[target]
+                ] = True
+
+        self.boolean_decomposition = {
+            sym: sp.csr_matrix(matrix) for sym, matrix in transitions.items()
+        }
+
+    def accepts(self, word: Iterable[str]) -> bool:
+        current_states = set(self.start_state_index)
+
+        for symbol in word:
+            next_states = set()
+            for state in current_states:
+                for dst in self.boolean_decomposition[symbol].nonzero()[1]:
+                    next_states.add(dst)
+            current_states = next_states
+            if not current_states:
+                return False
+
+        return bool(set(self.final_state_index).intersection(current_states))
+
+    def is_empty(self) -> bool:
+        reachability_matrix = self.transitive_closure()
+
+        for start_state in self.start_state_index:
+            for final_state in self.final_state_index:
+                if reachability_matrix[start_state, final_state]:
+                    return False
+
+        return True
 
     def transitive_closure(self):
         closure = sp.csr_matrix((self.states_count, self.states_count), dtype=bool)
@@ -55,94 +87,90 @@ class AdjacencyMatrixFA:
         res = np.linalg.matrix_power(closure.toarray(), self.states_count)
         return sp.csr_matrix(res)
 
-    def accepts(self, word: Iterable[Symbol]) -> bool:
-        symbols = list(word)
-        configs = [(symbols, state) for state in self.start_states_indices]
-
-        while len(configs) > 0:
-            tape, state = configs.pop()
-            if len(tape) == 0 and state in self.final_states_indices:
-                return True
-            for next_state in self.states.values():
-                if self.boolean_decomposition[tape[0]][state, next_state]:
-                    configs.append((tape[1:], next_state))
-
-        return False
-
-    def is_empty(self) -> bool:
-        transitive_closure = self.transitive_closure()
-        for start_state_id in self.start_states_indices:
-            for final_state_id in self.final_states_indices:
-                if transitive_closure[start_state_id, final_state_id]:
-                    return False
-        return True
-
 
 def intersect_automata(
-    automaton1: AdjacencyMatrixFA, automaton2: AdjacencyMatrixFA
+    automaton1: AdjacencyMatrixFA,
+    automaton2: AdjacencyMatrixFA,
 ) -> AdjacencyMatrixFA:
-    intersection = AdjacencyMatrixFA()
-    intersection.states_count = automaton1.states_count * automaton2.states_count
+    intersected_automaton = AdjacencyMatrixFA()
 
-    intersection.states = {
-        (i1, i2): (
-            automaton1.states[i1] * automaton2.states_count + automaton2.states[i2]
-        )
-        for i1, i2 in itertools.product(
-            automaton1.states.keys(), automaton2.states.keys()
-        )
-    }
-    intersection.start_states_indices = [
-        (s1 * automaton2.states_count + s2)
-        for s1, s2 in itertools.product(
-            automaton1.start_states_indices, automaton2.start_states_indices
-        )
-    ]
-    intersection.final_states_indices = [
-        (f1 * automaton2.states_count + f2)
-        for f1, f2 in itertools.product(
-            automaton1.final_states_indices, automaton2.final_states_indices
-        )
-    ]
-
-    intersection_symbols = (
-        automaton1.boolean_decomposition.keys()
-        & automaton2.boolean_decomposition.keys()
+    intersected_automaton.states_count = (
+        automaton1.states_count * automaton2.states_count
     )
-    for symbol in intersection_symbols:
-        intersection.boolean_decomposition[symbol] = sp.kron(
-            automaton1.boolean_decomposition[symbol],
-            automaton2.boolean_decomposition[symbol],
-            format="csr",
+
+    intersected_automaton.state_index = {
+        (s1, s2): (
+            automaton1.state_index[s1] * automaton2.states_count
+            + automaton2.state_index[s2]
+        )
+        for s1 in automaton1.state_index
+        for s2 in automaton2.state_index
+    }
+
+    intersected_automaton.index_state = {
+        idx: state for state, idx in intersected_automaton.state_index.items()
+    }
+
+    intersected_automaton.start_state_index = {
+        s1 * automaton2.states_count + s2
+        for s1 in automaton1.start_state_index
+        for s2 in automaton2.start_state_index
+    }
+
+    intersected_automaton.final_state_index = {
+        f1 * automaton2.states_count + f2
+        for f1 in automaton1.final_state_index
+        for f2 in automaton2.final_state_index
+    }
+
+    intersected_automaton.boolean_decomposition = {}
+
+    common_symbols = set(automaton1.boolean_decomposition.keys()).intersection(
+        automaton2.boolean_decomposition.keys()
+    )
+
+    for symbol in common_symbols:
+        matrix1 = automaton1.boolean_decomposition[symbol]
+        matrix2 = automaton2.boolean_decomposition[symbol]
+
+        intersected_automaton.boolean_decomposition[symbol] = sp.kron(
+            matrix1, matrix2, format="csr"
         )
 
-    return intersection
+    return intersected_automaton
 
 
 def tensor_based_rpq(
-    regex: str, graph: MultiDiGraph, start_nodes: set[int], final_nodes: set[int]
+    regex: str,
+    graph: MultiDiGraph,
+    start_nodes: set[int],
+    final_nodes: set[int],
 ) -> set[tuple[int, int]]:
-    dfa_m = AdjacencyMatrixFA(regex_to_dfa(regex))
-    nfa_m = AdjacencyMatrixFA(graph_to_nfa(graph, start_nodes, final_nodes))
+    regex_adj = AdjacencyMatrixFA(regex_to_dfa(regex))
+    graph_adj = AdjacencyMatrixFA(graph_to_nfa(graph, start_nodes, final_nodes))
+    intersect = intersect_automata(regex_adj, graph_adj)
+    result_set = set()
+    transitive_closure = intersect.transitive_closure()
 
-    intersection = intersect_automata(dfa_m, nfa_m)
-    tc = intersection.transitive_closure()
-
-    regex_init_start_states = [
-        key for key in dfa_m.states if dfa_m.states[key] in dfa_m.start_states_indices
+    regex_start_states = [
+        key
+        for key in regex_adj.state_index
+        if regex_adj.state_index[key] in regex_adj.start_state_index
     ]
-    reg_init_final_states = [
-        key for key in dfa_m.states if dfa_m.states[key] in dfa_m.final_states_indices
+    regex_final_states = [
+        key
+        for key in regex_adj.state_index
+        if regex_adj.state_index[key] in regex_adj.final_state_index
     ]
 
-    return {
-        (start, final)
-        for (start, final) in itertools.product(start_nodes, final_nodes)
-        for (regex_start, regex_final) in itertools.product(
-            regex_init_start_states, reg_init_final_states
-        )
-        if tc[
-            intersection.states[(regex_start, start)],
-            intersection.states[(regex_final, final)],
-        ]
-    }
+    for st in start_nodes:
+        for fn in final_nodes:
+            for st_reg in regex_start_states:
+                for fn_reg in regex_final_states:
+                    if transitive_closure[
+                        intersect.state_index[(st_reg, st)],
+                        intersect.state_index[(fn_reg, fn)],
+                    ]:
+                        result_set.add((st, fn))
+
+    return result_set
