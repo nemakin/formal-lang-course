@@ -24,5 +24,11 @@ jobs:
       - name: Sync dependencies
         run: rye sync
 
+      - name: Install antlr
+        run: rye tools install antlr4-tools
+
+      - name: Build parser
+        run: scripts/generate.sh
+
       - name: Run tests
         run: python scripts/run_tests.py
