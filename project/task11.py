@@ -1,35 +1,51 @@
-from antlr4 import InputStream, CommonTokenStream, ParserRuleContext, TerminalNode
+import antlr4
 from project.grammar.GraphLexer import GraphLexer
 from project.grammar.GraphParser import GraphParser
 
 
-def program_to_tree(program: str) -> tuple[ParserRuleContext, bool]:
-    input_stream = InputStream(program)
-    lexer = GraphLexer(input_stream)
-    token_stream = CommonTokenStream(lexer)
+class NodeCounter(antlr4.ParseTreeListener):
+    def __init__(self):
+        self.count = 0
+
+    def enterEveryRule(self, ctx):
+        self.count += 1
+
+
+class ToProgramListener(antlr4.ParseTreeListener):
+    def __init__(self) -> None:
+        self.tokens = []
+
+    def visitTerminal(self, node):
+        self.tokens.append(node.getText())
+
+    def getProgram(self):
+        return " ".join(self.tokens)
+
+
+def program_to_tree(program: str) -> tuple[antlr4.ParserRuleContext, bool]:
+    program = program.replace("<EOF>", "EOF")
+    lexer = GraphLexer(antlr4.InputStream(program))
+    token_stream = antlr4.CommonTokenStream(lexer)
     parser = GraphParser(token_stream)
+
     tree = parser.prog()
 
-    num_errors = parser.getNumberOfSyntaxErrors()
-    if num_errors > 0:
-        return None, False
-    return tree, True
+    if parser.getNumberOfSyntaxErrors() > 0:
+        return (None, False)
+    return (tree, True)
 
 
-def nodes_count(tree: ParserRuleContext) -> int:
-    count = 1
-    for child in tree.children:
-        if isinstance(child, ParserRuleContext):
-            count += 1
+def nodes_count(tree: antlr4.ParserRuleContext) -> int:
+    if tree:
+        counter = NodeCounter()
+        walker = antlr4.ParseTreeWalker()
+        walker.walk(counter, tree)
+        return counter.count
 
-    return count
 
-
-def tree_to_program(tree: ParserRuleContext) -> str:
-    program = ""
-    for child in tree.children:
-        if isinstance(child, ParserRuleContext):
-            program += tree_to_program(child)
-        if isinstance(child, TerminalNode):
-            program += child.getText() + " "
-    return program
+def tree_to_program(tree: antlr4.ParserRuleContext) -> str:
+    if tree:
+        listener = ToProgramListener()
+        walker = antlr4.ParseTreeWalker()
+        walker.walk(listener, tree)
+        return listener.getProgram()
